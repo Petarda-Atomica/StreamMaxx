@@ -1,4 +1,4 @@
-module main.go
+module yts
 
 go 1.20
 
