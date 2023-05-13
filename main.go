@@ -24,7 +24,7 @@ type download_link struct {
 	link    string
 }
 
-func search(arg_query string, arg_quality string, arg_genre string, arg_rating string, arg_order string, arg_year string, arg_language string) (error, []movie) {
+func Search(arg_query string, arg_quality string, arg_genre string, arg_rating string, arg_order string, arg_year string, arg_language string) (error, []movie) {
 	// Access the webpage
 	res, err := http.Get(fmt.Sprintf("https://yts.mx/browse-movies/%s/%s/%s/%s/%s/%s/%s", arg_query, arg_quality, arg_genre, arg_rating, arg_order, arg_year, arg_language))
 	if err != nil {
@@ -162,7 +162,7 @@ func search(arg_query string, arg_quality string, arg_genre string, arg_rating s
 	return nil, ret
 }
 
-func get_links(url string) (error, []download_link) {
+func Get_links(url string) (error, []download_link) {
 	cssSelector := "body div:nth-of-type(4) div:nth-of-type(3) div:nth-of-type(1) div:nth-of-type(4) p a"
 
 	// Send a GET request to the website and load the response body into a GoQuery document
@@ -201,7 +201,7 @@ func get_links(url string) (error, []download_link) {
 	return nil, ret
 }
 
-func download(download download_link) (error, []byte) {
+func Download(download download_link) (error, []byte) {
 	url := download.link
 
 	// Send GET request to the URL
