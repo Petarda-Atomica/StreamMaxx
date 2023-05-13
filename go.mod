@@ -1,4 +1,4 @@
-module yts
+module github.com/Petarda-Atomica/unofficial_yts_API
 
 go 1.20
 
