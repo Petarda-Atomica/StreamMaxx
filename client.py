@@ -1,6 +1,7 @@
 import socket
 
-HOST = 'localhost'  # The server's hostname or IP address
+HOST = 'localhost'
+HOST = '25.52.238.207'# The server's hostname or IP address
 PORT = 8080        # The port used by the server
 
 while True:
@@ -9,7 +10,7 @@ while True:
                         s.connect((HOST, PORT))
                         while True:
                                 # Get user input
-                                user_input = input("Prompt(name^index): ")
+                                user_input = input("Prompt(name^index^play^key_press): ")
                                 # Send the user input to the server
                                 s.sendall(user_input.encode())
         except:

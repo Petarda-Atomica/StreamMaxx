@@ -4,16 +4,19 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/f32"
 	"gioui.org/font/gofont"
 	"gioui.org/io/system"
 	"gioui.org/layout"
@@ -24,6 +27,7 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/micmonay/keybd_event"
 )
 
 type movie struct {
@@ -40,6 +44,7 @@ type download_link struct {
 	link    string
 }
 
+const ALLOW4K = false
 const NO = "NO"
 const YES = "YES"
 
@@ -220,27 +225,32 @@ func Get_links(url string) (error, []download_link) {
 		ret = append(ret, _download_link)
 	}
 
-	fmt.Println("returned")
+	//fmt.Println("returned")
 	return nil, ret
 }
 
-func Download(download download_link) (error, []byte) {
+func Download(download download_link) error {
 	url := download.link
 
 	// Send GET request to the URL
 	resp, err := http.Get(url)
 	if err != nil {
-		return err, []byte{}
+		return err
 	}
 	defer resp.Body.Close()
 
 	// Read the response body into a variable
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return err, []byte{}
+		return err
 	}
 
-	return nil, body
+	err = ioutil.WriteFile("playing_now.torrent", []byte(body), 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func YTS_API(communication chan []movie, indexing chan int, w *app.Window) {
@@ -355,50 +365,56 @@ func main() {
 	// Default values
 	//movie_list = make(chan []movie, 1)
 	//movie_index = make(chan int, 1)
-	response = []string{" ", "1", "NO"}
-
-	// Set up API
-	sock := makeListner("8080")
-	go func() {
-		for {
-			// Connect clients
-			conn, err := sock.Accept()
-			if err != nil {
-				fmt.Println("Catastrophic error! Please retry.")
-				continue
-			}
-			fmt.Println("Connected!")
-
-			// Read data
-			buf := make([]byte, 1024)
-			_, err = conn.Read(buf)
-			if err != nil {
-				fmt.Println("Error reading message:", err.Error())
-				conn.Close()
-				continue
-			}
-
-			// send data
-			response = strings.Split(string(buf), "^")
-			fmt.Println(response[1])
-			// Cleanup before convert
-			cleanStr := strings.ReplaceAll(response[1], "\x00", "")
-			indexed, err := strconv.Atoi(cleanStr)
-			if err != nil {
-				fmt.Println("Invalid response!")
-				fmt.Println(err)
-			} else {
-				index = indexed
-			}
-		}
-	}()
+	response = []string{" ", "0", "0", ""}
 
 	go func() {
 		w := app.NewWindow(
 			app.Title("StreamMaxx - by PetardaAtomica"),
-			//app.Fullscreen.Option(),
+			app.Fullscreen.Option(),
 			//app.Maximized.Option(),
 		)
+
+		// Set up API
+		sock := makeListner("8080")
+		go func() {
+			for {
+				// Connect clients
+				conn, err := sock.Accept()
+				if err != nil {
+					fmt.Println("Catastrophic error! Please retry.")
+					continue
+				}
+				fmt.Println("Connected!")
+
+				go func() {
+					for {
+						// Read data
+						buf := make([]byte, 1024)
+						_, err = conn.Read(buf)
+						if err != nil {
+							fmt.Println("Error reading message:", err.Error())
+							return
+						}
+
+						// send data
+						response = strings.Split(string(buf), "^")
+						// Cleanup before convert
+						cleanStr := strings.ReplaceAll(response[1], "\x00", "")
+						indexed, err := strconv.Atoi(cleanStr)
+						if err != nil {
+							fmt.Println("Invalid response!")
+							fmt.Println(err)
+						} else {
+							index = indexed
+						}
+
+						w.Invalidate()
+
+					}
+				}()
+			}
+		}()
+
 		err := run(w)
 		if err != nil {
 			log.Fatal(err)
@@ -450,11 +466,128 @@ func run(w *app.Window) error {
 				if err != nil {
 					fmt.Println(err)
 				}
+				if len(movies) == 0 {
+					movies = []movie{{
+						title:     "Not Found",
+						link:      "https://google.com",
+						year:      0,
+						rating:    "-1/10",
+						genres:    []string{},
+						bannerURL: "https://iili.io/HrwBikx.jpg",
+					}}
+				}
+			}
+
+			// Correct indexes
+			index = index % len(movies)
+
+			// Build banners
+			var banners []image.Image
+			banner_distance := 40
+			for i := 0; i < len(movies); i++ {
+				img, err := fetchImage(movies[i].bannerURL)
+				if err != nil {
+					fmt.Println(err)
+				}
+				banners = append(banners, img)
+
+				layout.Stack{}.Layout(gtx,
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						var imageOp paint.ImageOp
+						if response[0] != query || true {
+							// Add your custom object to the ops
+							imageOp = paint.NewImageOp(img)
+							imageOp.Add(&ops)
+
+							// Apply the desired transformation to the object
+							banner_size := f32.Pt(1.05, 1.05)
+							op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), banner_size)).Add(&ops)
+						}
+						// Apply the desired offset to the object
+						banner_Y := e.Size.Y / 2
+						canvas_center := (e.Size.X - imageOp.Size().X/2) / 2
+						if index == i {
+							banner_Y += banner_distance
+						}
+						op.Offset(image.Pt(canvas_center+(i-index)*(banner_distance+imageOp.Size().X), banner_Y)).Add(&ops)
+
+						// Paint the object
+						paint.PaintOp{}.Add(&ops)
+
+						// Return the dimensions of the object
+						return layout.Dimensions{
+							Size: imageOp.Size(),
+						}
+					}),
+				)
+
+			}
+
+			// Cleanup response
+			cleanStr := response[2]
+			cleanStr = strings.ReplaceAll(response[2], "\x00", "")
+			choice, err := strconv.Atoi(cleanStr)
+			if err != nil {
+				fmt.Println(err)
+			}
+			//fmt.Printf("Val: %d\nType: %d", choice, reflect.TypeOf(choice))
+
+			// Check if movie should start
+			if choice == 1 {
+				fmt.Println("Started download")
+
+				// Get download links
+				err, available_qualities := Get_links(movies[index].link)
+				if err != nil {
+					fmt.Println(err)
+				}
+
+				// Download movie
+				var link download_link
+				for i := 1; ; i++ {
+					current_quality := strings.Split(available_qualities[len(available_qualities)-i].quality, ".")[0]
+					real_quality, err := strconv.Atoi(strings.Replace(current_quality, "p", "", -1))
+					if err == nil && (real_quality < 2160 || ALLOW4K) {
+						link = available_qualities[len(available_qualities)-i]
+						break
+					} else {
+						//fmt.Println("Wrong codec...")
+					}
+
+					// If no quality is found, reverse action
+					if i == len(available_qualities)-1 {
+						choice = 0
+						fmt.Println("!!! No qualities found !!!")
+						break
+					}
+					//fmt.Println("I am stuck in a loop! Help!")
+
+				}
+				err = Download(link)
+				if err != nil {
+					fmt.Println(err)
+				}
+
+				// Check OS and play video
+				cmd := exec.Command("peerflix", "playing_now.torrent", "--vlc")
+
+				go cmd.Run()
+			} else {
+				cmd := exec.Command("taskkill", "/F", "/IM", "vlc.exe")
+
+				err := cmd.Run()
+				if err != nil {
+					fmt.Println(err)
+				}
+			}
+
+			// Handle key presses
+			if response[3] != "" {
+				pressKey(response[3])
 			}
 
 			title.Text = movies[index].title
 
-			w.Invalidate()
 			title.Layout(gtx)
 			e.Frame(gtx.Ops)
 		}
@@ -465,4 +598,56 @@ func clearChannel(ch chan []movie) {
 	for len(ch) > 0 {
 		<-ch
 	}
+}
+
+func fetchImage(url string) (image.Image, error) {
+	response, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	img, err := jpeg.Decode(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return img, nil
+}
+
+func pressKey(symbol string) {
+	kb, err := keybd_event.NewKeyBonding()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// For linux, it is very important to wait 2 seconds
+	/*
+		if runtime.GOOS == "linux" {
+			time.Sleep(2 * time.Second)
+		}
+	*/
+
+	// Cleanup
+	cleanStr := symbol
+	cleanStr = strings.ReplaceAll(symbol, "\x00", "")
+
+	// Select keys to be pressed
+	press := keybd_event.VK_A
+	switch cleanStr {
+	case "+":
+		press = keybd_event.VK_SPACE
+	case ">":
+		press = keybd_event.VK_RIGHT
+	case "<":
+		press = keybd_event.VK_LEFT
+	}
+	kb.SetKeys(press)
+
+	// Press the selected keys
+	err = kb.Launching()
+	if err != nil {
+		fmt.Println(err)
+	}
+
 }
